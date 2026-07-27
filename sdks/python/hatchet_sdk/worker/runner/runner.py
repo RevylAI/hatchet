@@ -644,31 +644,39 @@ class Runner:
             logger.exception(f"failed to terminate thread: {e}")
 
     async def handle_cancel_action(self, action: Action) -> None:
-        key = action.key
+        logical_key = f"{action.step_run_id}/{action.retry_count}"
+        keys = [
+            key
+            for key in self.tasks
+            if key == logical_key or key.startswith(f"{logical_key}/")
+        ] or [action.key]
         try:
             # call cancel to signal the context to stop
-            if key in self.contexts:
-                self.contexts[key]._set_cancellation_flag()
-                self.cancellations[key] = True
+            for key in keys:
+                if key in self.contexts:
+                    self.contexts[key]._set_cancellation_flag()
+                    self.cancellations[key] = True
 
             await asyncio.sleep(1)
 
-            if key in self.tasks:
-                self.tasks[key].cancel()
+            for key in keys:
+                if key in self.tasks:
+                    self.tasks[key].cancel()
 
-            # check if thread is still running, if so, print a warning
-            if key in self.threads:
-                thread = self.threads[key]
+                # check if thread is still running, if so, print a warning
+                if key in self.threads:
+                    thread = self.threads[key]
 
-                if self.config.enable_force_kill_sync_threads:
-                    self.force_kill_thread(thread)
-                    await asyncio.sleep(1)
+                    if self.config.enable_force_kill_sync_threads:
+                        self.force_kill_thread(thread)
+                        await asyncio.sleep(1)
 
-                logger.warning(
-                    f"thread {self.threads[key].ident} with key {key} is still running after cancellation. This could cause the thread pool to get blocked and prevent new tasks from running."
-                )
+                    logger.warning(
+                        f"thread {self.threads[key].ident} with key {key} is still running after cancellation. This could cause the thread pool to get blocked and prevent new tasks from running."
+                    )
         finally:
-            self.cleanup_run_id(key)
+            for key in keys:
+                self.cleanup_run_id(key)
 
     def serialize_output(
         self, validator: TypeAdapter[TaskPayloadForInternalUse], output: Any
